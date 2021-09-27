@@ -42,7 +42,7 @@ class Celoe_Test(unittest.TestCase):
                         'http://www.benchmark.org/family#Grandparent'})))
 
             target_kb = kb.ignore_and_copy(ignored_classes=concepts_to_ignore)
-            model = CELOE(knowledge_base=target_kb)
+            model = CELOE(knowledge_base=target_kb, max_runtime=10)
 
             returned_val = model.fit(learning_problem=lp)
             self.assertEqual(returned_val, model, "fit should return its self")
