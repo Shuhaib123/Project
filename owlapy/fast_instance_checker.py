@@ -282,6 +282,9 @@ class OWLReasoner_FastInstanceChecker(OWLReasoner):
 
         p = ce.get_property()
         assert isinstance(p, OWLObjectPropertyExpression)
+        if ce.get_filler().is_owl_thing():
+            return self._some_values_subject_index(p)
+
         filler_ind_enc = self._find_instances(ce.get_filler())
 
         ind_enc = self._find_some_values(p, filler_ind_enc)
