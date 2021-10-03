@@ -6,10 +6,10 @@ from typing import Iterable, Set, Final, cast
 import owlready2
 
 from owlapy import namespaces
-from owlapy.model import OWLOntologyManager, OWLOntology, OWLClass, OWLDataProperty, OWLObjectProperty, \
+from owlapy.model import OWLDatatype, OWLOntologyManager, OWLOntology, OWLClass, OWLDataProperty, OWLObjectProperty, \
     OWLNamedIndividual, OWLReasoner, OWLClassExpression, OWLObjectPropertyExpression, OWLOntologyID, OWLAxiom, \
     OWLOntologyChange, AddImport, OWLEquivalentClassesAxiom, OWLThing, OWLAnnotationAssertionAxiom, DoubleOWLDatatype, \
-    IRI, OWLObjectInverseOf \
+    IRI, OWLObjectInverseOf, BooleanOWLDatatype, IntegerOWLDatatype
     # OWLObjectSomeValuesFrom, OWLProperty, \
 from owlapy.owlready2.utils import ToOwlready2
 
@@ -187,6 +187,18 @@ class OWLReasoner_Owlready2(OWLReasoner):
         pe_x: owlready2.DataPropertyClass = self._world[pe.get_iri().as_str()]
         for dom in pe_x.domain:
             yield OWLClass(IRI.create(dom.iri))
+
+    def data_property_ranges(self, pe: OWLDataProperty, direct: bool = False) -> Iterable[OWLDatatype]:
+        if direct:
+            warning("direct not implemented")
+        pe_x: owlready2.DataPropertyClass = self._world[pe.get_iri().as_str()]
+        for rng in pe_x.range:
+            if isinstance(rng, int):
+                yield IntegerOWLDatatype
+            elif isinstance(rng, float):
+                yield DoubleOWLDatatype
+            elif isinstance(rng, bool):
+                yield BooleanOWLDatatype
 
     def object_property_domains(self, pe: OWLObjectProperty, direct: bool = False) -> Iterable[OWLClass]:
         if direct:

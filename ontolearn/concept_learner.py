@@ -5,7 +5,7 @@ import time
 from collections import deque
 from contextlib import contextmanager
 from itertools import islice
-from typing import Callable, Dict, Set, List, Tuple, Iterable, Optional, Generator, SupportsFloat
+from typing import Any, Callable, Dict, Final, Set, List, Tuple, Iterable, Optional, Generator, SupportsFloat
 
 import numpy as np
 import torch
@@ -30,7 +30,7 @@ from ontolearn.refinement_operators import LengthBasedRefinement
 from ontolearn.search import DRILLSearchTreePriorityQueue, EvoLearnerNode, HeuristicOrderedNode, OENode, TreeNode, LengthOrderedNode, \
     QualityOrderedNode, RL_State
 from ontolearn.utils import oplogging, create_experiment_folder
-from owlapy.model import OWLClass, OWLClassExpression, OWLNamedIndividual
+from owlapy.model import BooleanOWLDatatype, DoubleOWLDatatype, IntegerOWLDatatype, OWLClass, OWLClassExpression, OWLDataProperty, OWLDatatype, OWLNamedIndividual
 from owlapy.render import DLSyntaxObjectRenderer
 from owlapy.util import OrderedOWLObject
 from sortedcontainers import SortedSet
@@ -1142,10 +1142,12 @@ class CustomConceptLearner(CELOE):
 class EvoLearner(BaseConceptLearner[EvoLearnerNode]):
 
     __slots__ = 'fitness_func', 'init_method', 'algorithm', 'expressivity', 'tournament_size',  \
-                'population_size', 'num_generations', 'height_limit', 'pset', 'toolbox', \
-                '_learning_problem', '_result_population', 'mut_uniform_gen'
+                'population_size', 'num_generations', 'height_limit', 'use_data_properties', 'pset', 'toolbox', \
+                '_learning_problem', '_result_population', 'mut_uniform_gen', '_dp_to_prim_type'
 
     name = 'evolearner'
+
+    SUPPORTED_DATATYPES: Final[Set[OWLDatatype]] = {BooleanOWLDatatype, DoubleOWLDatatype, IntegerOWLDatatype}
 
     fitness_func: AbstractFitness
     init_method: AbstractEAInitialization
@@ -1156,11 +1158,13 @@ class EvoLearner(BaseConceptLearner[EvoLearnerNode]):
     population_size: int
     num_generations: int
     height_limit: int
+    use_data_properties: bool
 
     pset: gp.PrimitiveSetTyped
     toolbox: base.Toolbox
     _learning_problem: EncodedPosNegLPStandard
     _result_population: Optional[List['creator.Individual']]
+    _dp_to_prim_type: Dict[OWLDataProperty, Any]
 
     def __init__(self,
                  knowledge_base: KnowledgeBase,
@@ -1195,8 +1199,6 @@ class EvoLearner(BaseConceptLearner[EvoLearnerNode]):
         self.num_generations = num_generations
         self.height_limit = height_limit
 
-        self._result_population = None
-
         self.__setup()
 
     def __setup(self):
@@ -1211,6 +1213,10 @@ class EvoLearner(BaseConceptLearner[EvoLearnerNode]):
 
         if self.mut_uniform_gen is None:
             self.mut_uniform_gen = EARandomInitialization(min_height=1, max_height=3)
+
+        self._result_population = None
+        self._dp_to_prim_type = dict()
+        self.use_data_properties = '(D)' in self.expressivity
 
         self.pset = self.__build_primitive_set()
         self.toolbox = self.__build_toolbox()
@@ -1229,13 +1235,39 @@ class EvoLearner(BaseConceptLearner[EvoLearnerNode]):
         pset.addPrimitive(intersection, [OWLClassExpression, OWLClassExpression], OWLClassExpression,
                           name=OperatorVocabulary.INTERSECTION)
 
-        for property_ in ontology.object_properties_in_signature():
-            name = escape(property_.get_iri().get_remainder())
-            existential, universal = factory.create_existential_universal(property_)
+        for op in ontology.object_properties_in_signature():
+            name = escape(op.get_iri().get_remainder())
+            existential, universal = factory.create_existential_universal(op)
             pset.addPrimitive(existential, [OWLClassExpression], OWLClassExpression,
                               name=OperatorVocabulary.EXISTENTIAL + name)
             pset.addPrimitive(universal, [OWLClassExpression], OWLClassExpression,
                               name=OperatorVocabulary.UNIVERSAL + name)
+
+        if self.use_data_properties:
+            class Bool(object): 
+                pass
+            pset.addTerminal(False, Bool)
+            pset.addTerminal(True, Bool)
+
+            for dp in ontology.data_properties_in_signature():
+                name = escape(dp.get_iri().get_remainder())
+
+                ranges = set(self.kb.reasoner().data_property_ranges(dp))
+                if BooleanOWLDatatype in ranges:
+                    self._dp_to_prim_type[dp] = Bool
+
+                    data_has_value = factory.create_data_has_value(dp)
+                    pset.addPrimitive(data_has_value, [Bool], OWLClassExpression,
+                                      name=OperatorVocabulary.DATA_HAS_VALUE + name)
+                elif EvoLearner.SUPPORTED_DATATYPES & ranges:
+                    type_ = type(name, (object,), {})
+                    self._dp_to_prim_type[dp] = type_
+
+                    min_inc, max_inc = factory.create_data_some_values(dp)
+                    pset.addPrimitive(min_inc, [type_], OWLClassExpression,
+                                      name=OperatorVocabulary.DATA_MIN_INCLUSIVE + name)
+                    pset.addPrimitive(max_inc, [type_], OWLClassExpression,
+                                      name=OperatorVocabulary.DATA_MAX_INCLUSIVE + name)
 
         for class_ in ontology.classes_in_signature():
             pset.addTerminal(class_, OWLClass, name=escape(class_.get_iri().get_remainder()))

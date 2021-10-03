@@ -1213,6 +1213,20 @@ class OWLReasoner(metaclass=ABCMeta):
         pass
 
     @abstractmethod
+    def data_property_ranges(self, pe: OWLDataProperty, direct: bool = False) -> Iterable['OWLDatatype']:
+        """Gets the OWLDatatypes that are the direct or indirect ranges of this property with respect to the imports
+        closure of the root ontology.
+
+        Args:
+            pe: The property expression whose ranges are to be retrieved.
+            direct: Specifies if the direct ranges should be retrieved (True), or if all ranges should be retrieved
+                (False).
+
+        Returns:
+        """
+        pass
+
+    @abstractmethod
     def equivalent_classes(self, ce: OWLClassExpression) -> Iterable[OWLClass]:
         """Gets the named classes that are equivalent to the specified class expression with respect to the set of
         reasoner axioms.
