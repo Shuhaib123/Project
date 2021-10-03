@@ -1243,6 +1243,19 @@ class OWLReasoner(metaclass=ABCMeta):
         pass
 
     @abstractmethod
+    def data_properties(self, ind: OWLNamedIndividual) -> Iterable[OWLDataProperty]:
+        """Gets the data properties for the specified individual.
+
+        Args:
+            ind: The individual that is the subject of the data properties
+
+        Returns:
+            The data properties pe for the individual ind such that the set of reasoner axioms entail
+            DataPropertyAssertion(pe ind l) for any literal j.
+        """
+        pass
+
+    @abstractmethod
     def object_property_values(self, ind: OWLNamedIndividual, pe: OWLObjectPropertyExpression) \
             -> Iterable[OWLNamedIndividual]:
         """Gets the object property values for the specified individual and object property expression.
@@ -1254,6 +1267,19 @@ class OWLReasoner(metaclass=ABCMeta):
         Returns:
             The named individuals such that for each individual j, the set of reasoner axioms entails
             ObjectPropertyAssertion(pe ind j).
+        """
+        pass
+
+    @abstractmethod
+    def object_properties(self, ind: OWLNamedIndividual) -> Iterable[OWLObjectProperty]:
+        """Gets the object properties for the specified individual.
+
+        Args:
+            ind: The individual that is the subject of the object properties
+
+        Returns:
+            The object properties pe for the individual ind such that the set of reasoner axioms entail
+            ObjectPropertyAssertion(pe ind j) for any individual j.
         """
         pass
 

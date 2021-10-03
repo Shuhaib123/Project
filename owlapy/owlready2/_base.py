@@ -225,6 +225,12 @@ class OWLReasoner_Owlready2(OWLReasoner):
         for val in p._get_values_for_individual(i):
             yield val
 
+    def data_properties(self, ind: OWLNamedIndividual) -> Iterable[OWLDataProperty]:
+        i: owlready2.Thing = self._world[ind.get_iri().as_str()]
+        for p_x in i.get_properties():
+            if isinstance(p_x, owlready2.DataPropertyClass):
+                yield OWLDataProperty(IRI.create(p_x.iri))
+
     def object_property_values(self, ind: OWLNamedIndividual, pe: OWLObjectPropertyExpression) \
             -> Iterable[OWLNamedIndividual]:
         if isinstance(pe, OWLObjectProperty):
@@ -239,6 +245,12 @@ class OWLReasoner_Owlready2(OWLReasoner):
                 yield OWLNamedIndividual(IRI.create(val.iri))
         else:
             raise NotImplementedError(pe)
+
+    def object_properties(self, ind: OWLNamedIndividual) -> Iterable[OWLObjectProperty]:
+        i: owlready2.Thing = self._world[ind.get_iri().as_str()]
+        for p_x in i.get_properties():
+            if isinstance(p_x, owlready2.ObjectPropertyClass):
+                yield OWLObjectProperty(IRI.create(p_x.iri))
 
     def flush(self) -> None:
         pass
