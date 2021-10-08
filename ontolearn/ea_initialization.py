@@ -1,10 +1,11 @@
 import itertools
 from ontolearn.ea_utils import OperatorVocabulary, escape
 from ontolearn.knowledge_base import KnowledgeBase
-from owlapy.model import OWLClass, OWLClassExpression, OWLNamedIndividual, OWLObjectProperty
+from owlapy.model import BooleanOWLDatatype, DoubleOWLDatatype, IntegerOWLDatatype, OWLClass, OWLClassExpression, \
+    OWLDataProperty, OWLNamedIndividual, OWLObjectProperty, OWLPropertyExpression, Python_Types
 import random
 from abc import ABCMeta, abstractmethod
-from typing import Callable, Dict, List, Tuple, Union
+from typing import Any, Callable, Dict, List, Tuple, Union
 from deap.gp import Primitive, PrimitiveSetTyped, Terminal
 from deap import creator
 
@@ -91,16 +92,22 @@ class EARandomInitialization(AbstractEAInitialization):
                     self._build_tree(tree, pset, height, current_height+1, arg_type, use_grow)
 
 
+# BIG TODO: Fix type hints 
 class EARandomWalkInitialization(AbstractEAInitialization):
     """Random walk initialization for description logic learning.
 
     """
-    __slots__ = 'max_r', 'jump_pr', 'type_counts'
+    __slots__ = 'max_r', 'jump_pr', 'type_counts', 'use_data_properties', 'dp_to_prim_type', 'dp_splits'
 
     connection_pr: float = 0.5
 
     max_r: int
     jump_pr: float
+
+    type_counts: Dict[OWLClass, int]
+    use_data_properties: bool
+    dp_to_prim_type: Dict[OWLDataProperty, Any]
+    dp_splits: Dict[OWLDataProperty, List[Python_Types]]
 
     def __init__(self, max_r: int = 2, jump_pr: float = 0.5):
         """
@@ -111,13 +118,27 @@ class EARandomWalkInitialization(AbstractEAInitialization):
         self.max_r = max_r
         self.jump_pr = jump_pr
 
+        self.type_counts = dict()
+        self.use_data_properties = False
+        self.dp_to_prim_type = dict()
+        self.dp_splits = dict()
+
     def get_population(self, container: Callable,
                        pset: PrimitiveSetTyped,
                        population_size: int = 0,
                        pos: List[OWLNamedIndividual] = None,
+                       use_data_properties: bool = False,
+                       dp_to_prim_type: Dict[OWLDataProperty, Any] = None,
+                       dp_splits: Dict[OWLDataProperty, List[Python_Types]] = None,
                        kb: KnowledgeBase = None) -> List['creator.Individual']:
         assert pos is not None
         assert kb is not None
+        assert dp_to_prim_type is not None
+        assert dp_splits is not None
+
+        self.use_data_properties = use_data_properties
+        self.dp_to_prim_type = dp_to_prim_type
+        self.dp_splits = dp_splits
         self.type_counts = self._compute_type_counts(pos, kb)
 
         count = 0
@@ -136,7 +157,7 @@ class EARandomWalkInitialization(AbstractEAInitialization):
         assert ind is not None
         assert kb is not None
         type_ = self._select_type(ind, kb)
-        paths = self._select_paths(list(kb.reasoner().object_properties(ind)), ind, kb)
+        paths = self._select_paths(self._select_properties(ind, kb), ind, kb)
 
         expr: List[Union[Primitive, Terminal]] = []
         if len(paths) > 0:
@@ -149,6 +170,12 @@ class EARandomWalkInitialization(AbstractEAInitialization):
 
             if isinstance(path[0], OWLObjectProperty):
                 self._build_object_property(expr, ind, path, pset, kb)
+            elif isinstance(path[0], OWLDataProperty):
+                ranges = set(kb.reasoner().data_property_ranges(path[0]))
+                if BooleanOWLDatatype in ranges:
+                    self._build_bool_property(expr, path, pset)
+                elif IntegerOWLDatatype in ranges or DoubleOWLDatatype in ranges:
+                    self._build_float_property(expr, path, pset)
 
         return expr
 
@@ -168,12 +195,17 @@ class EARandomWalkInitialization(AbstractEAInitialization):
         weights = [self.type_counts[t] for t in types_ind]
         return random.choices(types_ind, weights=weights)[0]
 
-    def _select_paths(self, properties: List[OWLObjectProperty], ind: OWLNamedIndividual,
-                      kb: KnowledgeBase) -> List[Tuple[OWLObjectProperty, OWLNamedIndividual]]:
-        ind_neighbours = dict()
-        for p in properties:
-            if isinstance(p, OWLObjectProperty):
-                ind_neighbours[p] = list(kb.reasoner().object_property_values(ind, p))
+    def _select_properties(self, ind: OWLNamedIndividual, kb: KnowledgeBase) -> List[OWLPropertyExpression]:
+        properties: List[OWLPropertyExpression] = list(kb.reasoner().object_properties(ind))
+        for p in kb.reasoner().data_properties(ind):
+            if p in self.dp_to_prim_type:
+                properties.append(p)
+        return properties
+
+    def _select_paths(self, properties: List[OWLPropertyExpression], ind: OWLNamedIndividual,
+                      kb: KnowledgeBase) -> List[Tuple[OWLPropertyExpression, Union[OWLNamedIndividual, Python_Types]]]:
+        ind_neighbours: Dict[OWLPropertyExpression, List[Union[OWLNamedIndividual, Python_Types]]] = dict()
+        ind_neighbours = {p: self._get_property_values(ind, p, kb) for p in properties}
 
         paths = []
         if len(properties) < self.max_r:
@@ -196,35 +228,77 @@ class EARandomWalkInitialization(AbstractEAInitialization):
         return paths
 
     def _build_object_property(self, expr: List[Union[Primitive, Terminal]], ind: OWLNamedIndividual,
-                               path: Tuple[OWLObjectProperty, OWLNamedIndividual], pset: PrimitiveSetTyped,
-                               kb: KnowledgeBase):
-        self._add_primitive(expr, pset, path[0])
+                               path: Tuple[OWLPropertyExpression, OWLNamedIndividual],
+                               pset: PrimitiveSetTyped, kb: KnowledgeBase):
+        assert isinstance(path[0], OWLObjectProperty)
+        self._add_primitive(expr, pset, path[0], OperatorVocabulary.EXISTENTIAL)
 
         second_ind = path[1]
-        properties = list(kb.reasoner().object_properties(second_ind))
+        assert isinstance(second_ind, OWLNamedIndividual)
+
+        properties = self._select_properties(second_ind, kb)
 
         # Select next path while prohibiting a loop back to the first individual
         next_path = None
         while next_path is None and len(properties) > 1:
             temp_prop = random.choice(properties)
-            inds = list(kb.reasoner().object_property_values(second_ind, temp_prop))
-            try:
-                inds.remove(ind)
-            except ValueError:
-                pass
+            objs = self._get_property_values(second_ind, temp_prop, kb)
 
-            if len(inds) > 0:
-                next_path = (temp_prop, random.choice(inds))
+            if isinstance(temp_prop, OWLObjectProperty):
+                try:
+                    objs.remove(ind)
+                except ValueError:
+                    pass
+
+            if len(objs) > 0:
+                next_path = (temp_prop, random.choice(objs))
 
             properties.remove(temp_prop)
 
         if next_path is not None and random.random() < self.jump_pr:
-            self._add_primitive(expr, pset, next_path[0])
-            type_ = random.choice(list(kb.reasoner().types(next_path[1], direct=True)))
-            self._add_object_terminal(expr, pset, type_)
+            if isinstance(next_path[0], OWLObjectProperty):
+                self._add_primitive(expr, pset, next_path[0], OperatorVocabulary.EXISTENTIAL)
+                assert isinstance(next_path[1], OWLNamedIndividual)
+                type_ = random.choice(list(kb.reasoner().types(next_path[1], direct=True)))
+                self._add_object_terminal(expr, pset, type_)
+            elif isinstance(next_path[0], OWLDataProperty):
+                ranges = set(kb.reasoner().data_property_ranges(next_path[0]))
+                if BooleanOWLDatatype in ranges:
+                    self._build_bool_property(expr, next_path, pset)
+                elif IntegerOWLDatatype in ranges or DoubleOWLDatatype in ranges:
+                    self._build_float_property(expr, next_path, pset)
+
         else:
             type_ = random.choice(list(kb.reasoner().types(second_ind, direct=True)))
             self._add_object_terminal(expr, pset, type_)
+
+    def _build_bool_property(self, expr: List[Union[Primitive, Terminal]],
+                             path: Tuple[OWLPropertyExpression, bool],
+                             pset: PrimitiveSetTyped):
+        assert isinstance(path[0], OWLDataProperty)
+        self._add_primitive(expr, pset, path[0], OperatorVocabulary.DATA_HAS_VALUE)
+        self._add_data_terminal(expr, pset, path)
+
+    def _build_float_property(self, expr: List[Union[Primitive, Terminal]],
+                              path: Tuple[OWLPropertyExpression, float],
+                              pset: PrimitiveSetTyped):
+        assert isinstance(path[0], OWLDataProperty)
+        splits = self.dp_splits[path[0]]
+        nearest_value = min(splits, key=lambda k: abs(k-path[1])) if len(splits) > 0 else 0
+        vocab = OperatorVocabulary.DATA_MIN_INCLUSIVE \
+            if nearest_value <= path[1] else OperatorVocabulary.DATA_MAX_INCLUSIVE
+
+        self._add_primitive(expr, pset, path[0], vocab)
+        self._add_data_terminal(expr, pset, (path[0], nearest_value))
+
+    def _get_property_values(self, ind: OWLNamedIndividual, property_: OWLPropertyExpression, kb: KnowledgeBase) \
+            -> List[Union[OWLNamedIndividual, Python_Types]]:
+        if isinstance(property_, OWLObjectProperty):
+            return list(kb.reasoner().object_property_values(ind, property_))
+        elif isinstance(property_, OWLDataProperty):
+            return [lit.to_python() for lit in kb.reasoner().data_property_values(ind, property_)]
+        else:
+            raise ValueError
 
     def _add_intersection_or_union(self, expr: List[Union[Primitive, Terminal]], pset: PrimitiveSetTyped):
         if random.random() <= EARandomWalkInitialization.connection_pr:
@@ -236,11 +310,18 @@ class EARandomWalkInitialization(AbstractEAInitialization):
         for t in pset.terminals[OWLClass]:
             if t.name == escape(type_.get_iri().get_remainder()):
                 expr.append(t)
-                break
+                return
+
+    def _add_data_terminal(self, expr: List[Union[Primitive, Terminal]], pset: PrimitiveSetTyped,
+                           path: Tuple[OWLDataProperty, Python_Types]):
+        for t in pset.terminals[self.dp_to_prim_type[path[0]]]:
+            if t.name == str(path[1]):
+                expr.append(t)
+                return
 
     def _add_primitive(self, expr: List[Union[Primitive, Terminal]], pset: PrimitiveSetTyped,
-                       property_: OWLObjectProperty):
+                       path: Union[OWLObjectProperty, OWLDataProperty], vocab: OperatorVocabulary):
         for p in pset.primitives[OWLClassExpression]:
-            if p.name == OperatorVocabulary.EXISTENTIAL + escape(property_.get_iri().get_remainder()):
+            if p.name == vocab + escape(path.get_iri().get_remainder()):
                 expr.append(p)
-                break
+                return

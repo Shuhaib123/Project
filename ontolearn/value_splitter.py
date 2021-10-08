@@ -2,8 +2,8 @@ from abc import ABCMeta, abstractmethod
 from typing import ClassVar, Dict, List, Set
 
 from ontolearn.knowledge_base import KnowledgeBase
-from owlapy.model import DoubleOWLDatatype, IntegerOWLDatatype, OWLDataProperty, OWLDatatype, OWLNamedIndividual, \
-    Python_Types
+from owlapy.model import DoubleOWLDatatype, IntegerOWLDatatype, OWLDataProperty, OWLDatatype, OWLNamedIndividual
+from owlapy.model.providers import Provider_Split_Types
 
 import math
 
@@ -14,7 +14,7 @@ class AbstractValueSplitter(metaclass=ABCMeta):
     """
     __slots__ = 'max_nr_splits'
 
-    supported_dataPython_Types: ClassVar[Set[OWLDatatype]]
+    supported_datatypes: ClassVar[Set[OWLDatatype]]
 
     max_nr_splits: int
 
@@ -24,14 +24,14 @@ class AbstractValueSplitter(metaclass=ABCMeta):
 
     @abstractmethod
     def compute_splits_properties(self, kb: KnowledgeBase, properties: List[OWLDataProperty] = None) \
-            -> Dict[OWLDataProperty, List[Python_Types]]:
+            -> Dict[OWLDataProperty, List[Provider_Split_Types]]:
         pass
 
     def _get_all_properties(self, kb: KnowledgeBase) -> List[OWLDataProperty]:
         properties = []
         for p in kb.ontology().data_properties_in_signature():
             ranges = set(kb.reasoner().data_property_ranges(p))
-            if self.supported_dataPython_Types & ranges:
+            if self.supported_datatypes & ranges:
                 properties.append(p)
         return properties
 
@@ -42,13 +42,13 @@ class BinningValueSplitter(AbstractValueSplitter):
     """
     __slots__ = ()
 
-    supported_dataPython_Types: ClassVar[Set[OWLDatatype]] = {IntegerOWLDatatype, DoubleOWLDatatype}
+    supported_datatypes: ClassVar[Set[OWLDatatype]] = {IntegerOWLDatatype, DoubleOWLDatatype}
 
     def __init__(self, max_nr_splits: int = 10):
         super().__init__(max_nr_splits)
 
     def compute_splits_properties(self, kb: KnowledgeBase, properties: List[OWLDataProperty] = None) \
-            -> Dict[OWLDataProperty, List[Python_Types]]:
+            -> Dict[OWLDataProperty, List[Provider_Split_Types]]:
         if properties is None:
             properties = self._get_all_properties(kb)
         dp_splits = dict()
@@ -57,8 +57,8 @@ class BinningValueSplitter(AbstractValueSplitter):
             dp_splits[p] = self._compute_splits_property(values)
         return dp_splits
 
-    def _compute_splits_property(self, values: Set[Python_Types]) -> List[Python_Types]:
-        values = sorted(list(values))
+    def _compute_splits_property(self, values: List[Provider_Split_Types]) -> List[Provider_Split_Types]:
+        values = sorted(values)
         nr_splits = min(self.max_nr_splits, len(values))
 
         splits = set()
@@ -74,7 +74,7 @@ class BinningValueSplitter(AbstractValueSplitter):
 
         return sorted(list(splits))
 
-    def _combine_values(self, a: Python_Types, b: Python_Types) -> Python_Types:
+    def _combine_values(self, a: Provider_Split_Types, b: Provider_Split_Types) -> Provider_Split_Types:
         assert type(a) == type(b)
 
         if isinstance(a, int):
@@ -84,11 +84,11 @@ class BinningValueSplitter(AbstractValueSplitter):
         else:
             raise ValueError
 
-    def _get_values_property(self, kb: KnowledgeBase, property_: OWLDataProperty) -> List[Python_Types]:
+    def _get_values_property(self, kb: KnowledgeBase, property_: OWLDataProperty) -> List[Provider_Split_Types]:
         values = set()
         for i in kb.ontology().individuals_in_signature():
             values.update({lit.to_python() for lit in kb.reasoner().data_property_values(i, property_)})
-        return values
+        return list(values)
 
 
 class EntropyValueSplitter(AbstractValueSplitter):
@@ -103,7 +103,7 @@ class EntropyValueSplitter(AbstractValueSplitter):
     def compute_splits(self, kb: KnowledgeBase,
                        properties: List[OWLDataProperty] = None,
                        pos: Set[OWLNamedIndividual] = None,
-                       neg: Set[OWLNamedIndividual] = None) -> Dict[OWLDataProperty, List[Python_Types]]:
+                       neg: Set[OWLNamedIndividual] = None) -> Dict[OWLDataProperty, List[Provider_Split_Types]]:
         assert pos is not None
         assert neg is not None
 

@@ -1,6 +1,9 @@
 from enum import Enum
-from typing import Final
-from owlapy.model import OWLClassExpression, OWLLiteral, OWLObjectPropertyExpression
+from typing import Any, Callable, Final, Tuple
+from owlapy.model import OWLObjectPropertyExpression, OWLObjectSomeValuesFrom, OWLObjectUnionOf, \
+    OWLClassExpression, OWLDataHasValue, OWLDataPropertyExpression, OWLDataSomeValuesFrom, OWLLiteral, \
+    OWLObjectAllValuesFrom, OWLObjectIntersectionOf
+
 from ontolearn.knowledge_base import KnowledgeBase
 import re
 
@@ -14,45 +17,48 @@ class PrimitiveFactory:
     def __init__(self, knowledge_base: KnowledgeBase):
         self.knowledge_base = knowledge_base
 
-    def create_union(self):
+    def create_union(self) -> Callable[[OWLClassExpression, OWLClassExpression], OWLObjectUnionOf]:
 
-        def union(A: OWLClassExpression, B: OWLClassExpression) -> OWLClassExpression:
+        def union(A: OWLClassExpression, B: OWLClassExpression) -> OWLObjectUnionOf:
             return self.knowledge_base.union([A, B])
 
         return union
 
-    def create_intersection(self):
+    def create_intersection(self) -> Callable[[OWLClassExpression, OWLClassExpression], OWLObjectIntersectionOf]:
 
-        def intersection(A: OWLClassExpression, B: OWLClassExpression) -> OWLClassExpression:
+        def intersection(A: OWLClassExpression, B: OWLClassExpression) -> OWLObjectIntersectionOf:
             return self.knowledge_base.intersection([A, B])
 
         return intersection
 
-    def create_existential_universal(self, property_: OWLObjectPropertyExpression):
+    def create_existential_universal(self, property_: OWLObjectPropertyExpression) \
+            -> Tuple[Callable[[OWLClassExpression], OWLObjectSomeValuesFrom],
+                     Callable[[OWLClassExpression], OWLObjectAllValuesFrom]]:
 
-        def existential_restriction(filler: OWLClassExpression) -> OWLClassExpression:
+        def existential_restriction(filler: OWLClassExpression) -> OWLObjectSomeValuesFrom:
             return self.knowledge_base.existential_restriction(filler, property_)
 
-        def universal_restriction(filler: OWLClassExpression) -> OWLClassExpression:
+        def universal_restriction(filler: OWLClassExpression) -> OWLObjectAllValuesFrom:
             return self.knowledge_base.universal_restriction(filler, property_)
 
         return existential_restriction, universal_restriction
-    
-    def create_data_some_values(self, property_):
 
-        def data_some_min_inclusive(value):
+    def create_data_some_values(self, property_: OWLDataPropertyExpression) \
+            -> Tuple[Callable[[Any], OWLDataSomeValuesFrom], Callable[[Any], OWLDataSomeValuesFrom]]:
+
+        def data_some_min_inclusive(value: Any) -> OWLDataSomeValuesFrom:
             filler = OWLDatatypeMinInclusiveRestriction(value)
             return self.knowledge_base.data_existential_restriction(filler, property_)
 
-        def data_some_max_inclusive(value):
+        def data_some_max_inclusive(value: Any) -> OWLDataSomeValuesFrom:
             filler = OWLDatatypeMaxInclusiveRestriction(value)
             return self.knowledge_base.data_existential_restriction(filler, property_)
 
         return data_some_min_inclusive, data_some_max_inclusive
-    
-    def create_data_has_value(self, property_):
 
-        def data_has_value(value):
+    def create_data_has_value(self, property_: OWLDataPropertyExpression) -> Callable[[Any], OWLDataHasValue]:
+
+        def data_has_value(value: Any) -> OWLDataHasValue:
             return self.knowledge_base.data_has_value_restriction(OWLLiteral(value), property_)
 
         return data_has_value

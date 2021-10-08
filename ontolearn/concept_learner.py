@@ -31,7 +31,9 @@ from ontolearn.search import DRILLSearchTreePriorityQueue, EvoLearnerNode, Heuri
     QualityOrderedNode, RL_State
 from ontolearn.utils import oplogging, create_experiment_folder
 from ontolearn.value_splitter import AbstractValueSplitter, BinningValueSplitter, EntropyValueSplitter
-from owlapy.model import BooleanOWLDatatype, DoubleOWLDatatype, IntegerOWLDatatype, OWLClass, OWLClassExpression, OWLDataProperty, OWLDatatype, OWLLiteral, OWLNamedIndividual
+from owlapy.model import BooleanOWLDatatype, DoubleOWLDatatype, IntegerOWLDatatype, OWLClass, OWLClassExpression, \
+    OWLDataProperty, OWLDatatype, OWLNamedIndividual
+from owlapy.model.providers import Provider_Split_Types
 from owlapy.render import DLSyntaxObjectRenderer
 from owlapy.util import OrderedOWLObject
 from sortedcontainers import SortedSet
@@ -1168,7 +1170,7 @@ class EvoLearner(BaseConceptLearner[EvoLearnerNode]):
     _learning_problem: EncodedPosNegLPStandard
     _result_population: Optional[List['creator.Individual']]
     _dp_to_prim_type: Dict[OWLDataProperty, Any]
-    _dp_splits: Dict[OWLDataProperty, List[Any]]
+    _dp_splits: Dict[OWLDataProperty, List[Provider_Split_Types]]
 
     def __init__(self,
                  knowledge_base: KnowledgeBase,
@@ -1353,7 +1355,7 @@ class EvoLearner(BaseConceptLearner[EvoLearnerNode]):
                 self._dp_splits = self.value_splitter.compute_splits_properties(self.kb)
                 print(self._dp_splits)
             elif isinstance(self.value_splitter, EntropyValueSplitter):
-                self._dp_splits = self.value_splitter.compute_splits_properties(self.kb, pos, neg)
+                self._dp_splits = self.value_splitter.compute_splits_properties(self.kb, pos=pos, neg=neg)
             else:
                 raise ValueError
             self.__set_splitting_values()
