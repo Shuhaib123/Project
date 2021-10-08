@@ -19,6 +19,7 @@ MOVE(OWLObject, OWLAnnotationObject, OWLAnnotationSubject, OWLAnnotationValue, H
 
 _T = TypeVar('_T')  #:
 _C = TypeVar('_C', bound='OWLObject')  #:
+Python_Types = Union[int, float, bool]
 
 
 class HasIndex(Protocol):
@@ -1587,6 +1588,9 @@ class OWLLiteral(OWLAnnotationValue, metaclass=ABCMeta):
     def as_literal(self) -> 'OWLLiteral':
         # documented in parent
         return self
+
+    def to_python(self) -> Python_Types:
+        return self._v
 
     @abstractmethod
     def get_datatype(self) -> OWLDatatype:

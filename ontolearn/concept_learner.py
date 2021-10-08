@@ -30,7 +30,8 @@ from ontolearn.refinement_operators import LengthBasedRefinement
 from ontolearn.search import DRILLSearchTreePriorityQueue, EvoLearnerNode, HeuristicOrderedNode, OENode, TreeNode, LengthOrderedNode, \
     QualityOrderedNode, RL_State
 from ontolearn.utils import oplogging, create_experiment_folder
-from owlapy.model import BooleanOWLDatatype, DoubleOWLDatatype, IntegerOWLDatatype, OWLClass, OWLClassExpression, OWLDataProperty, OWLDatatype, OWLNamedIndividual
+from ontolearn.value_splitter import AbstractValueSplitter, BinningValueSplitter, EntropyValueSplitter
+from owlapy.model import BooleanOWLDatatype, DoubleOWLDatatype, IntegerOWLDatatype, OWLClass, OWLClassExpression, OWLDataProperty, OWLDatatype, OWLLiteral, OWLNamedIndividual
 from owlapy.render import DLSyntaxObjectRenderer
 from owlapy.util import OrderedOWLObject
 from sortedcontainers import SortedSet
@@ -1143,7 +1144,8 @@ class EvoLearner(BaseConceptLearner[EvoLearnerNode]):
 
     __slots__ = 'fitness_func', 'init_method', 'algorithm', 'expressivity', 'tournament_size',  \
                 'population_size', 'num_generations', 'height_limit', 'use_data_properties', 'pset', 'toolbox', \
-                '_learning_problem', '_result_population', 'mut_uniform_gen', '_dp_to_prim_type'
+                '_learning_problem', '_result_population', 'mut_uniform_gen', '_dp_to_prim_type', '_dp_splits', \
+                'value_splitter'
 
     name = 'evolearner'
 
@@ -1153,6 +1155,7 @@ class EvoLearner(BaseConceptLearner[EvoLearnerNode]):
     init_method: AbstractEAInitialization
     algorithm: AbstractEvolutionaryAlgorithm
     mut_uniform_gen: AbstractEAInitialization
+    value_splitter: AbstractValueSplitter
     expressivity: str
     tournament_size: int
     population_size: int
@@ -1165,6 +1168,7 @@ class EvoLearner(BaseConceptLearner[EvoLearnerNode]):
     _learning_problem: EncodedPosNegLPStandard
     _result_population: Optional[List['creator.Individual']]
     _dp_to_prim_type: Dict[OWLDataProperty, Any]
+    _dp_splits: Dict[OWLDataProperty, List[Any]]
 
     def __init__(self,
                  knowledge_base: KnowledgeBase,
@@ -1173,6 +1177,7 @@ class EvoLearner(BaseConceptLearner[EvoLearnerNode]):
                  init_method: Optional[AbstractEAInitialization] = None,
                  algorithm: Optional[AbstractEvolutionaryAlgorithm] = None,
                  mut_uniform_gen: Optional[AbstractEAInitialization] = None,
+                 value_splitter: Optional[AbstractValueSplitter] = None,
                  terminate_on_goal: Optional[bool] = None,
                  max_runtime: Optional[int] = None,
                  expressivity: str = 'ALC',
@@ -1193,6 +1198,7 @@ class EvoLearner(BaseConceptLearner[EvoLearnerNode]):
         self.init_method = init_method
         self.algorithm = algorithm
         self.mut_uniform_gen = mut_uniform_gen
+        self.value_splitter = value_splitter
         self.expressivity = expressivity
         self.tournament_size = tournament_size
         self.population_size = population_size
@@ -1214,8 +1220,12 @@ class EvoLearner(BaseConceptLearner[EvoLearnerNode]):
         if self.mut_uniform_gen is None:
             self.mut_uniform_gen = EARandomInitialization(min_height=1, max_height=3)
 
+        if self.value_splitter is None:
+            self.value_splitter = BinningValueSplitter()
+
         self._result_population = None
         self._dp_to_prim_type = dict()
+        self._dp_splits = dict()
         self.use_data_properties = '(D)' in self.expressivity
 
         self.pset = self.__build_primitive_set()
@@ -1244,7 +1254,7 @@ class EvoLearner(BaseConceptLearner[EvoLearnerNode]):
                               name=OperatorVocabulary.UNIVERSAL + name)
 
         if self.use_data_properties:
-            class Bool(object): 
+            class Bool(object):
                 pass
             pset.addTerminal(False, Bool)
             pset.addTerminal(True, Bool)
@@ -1271,6 +1281,8 @@ class EvoLearner(BaseConceptLearner[EvoLearnerNode]):
 
         for class_ in ontology.classes_in_signature():
             pset.addTerminal(class_, OWLClass, name=escape(class_.get_iri().get_remainder()))
+
+        pset.addTerminal(self.kb.thing, OWLClass, name=escape(self.kb.thing.get_iri().get_remainder()))
 
         return pset
 
@@ -1301,6 +1313,14 @@ class EvoLearner(BaseConceptLearner[EvoLearnerNode]):
 
         return toolbox
 
+    def __set_splitting_values(self):
+        for p in self._dp_splits:
+            del self.pset.terminals[self._dp_to_prim_type[p]]
+            if len(self._dp_splits[p]) == 0:
+                self.pset.addTerminal(0, self._dp_to_prim_type[p])
+            for split in self._dp_splits[p]:
+                self.pset.addTerminal(split, self._dp_to_prim_type[p])
+
     def register_op(self, alias: str, function: Callable, *args, **kargs):
         self.toolbox.register(alias, function, *args, **kargs)
         if alias == 'mate' or alias == 'mutate':
@@ -1318,7 +1338,7 @@ class EvoLearner(BaseConceptLearner[EvoLearnerNode]):
         verbose = kwargs.pop("verbose", 0)
 
         self.start_time = time.time()
-        population = self._initialize(learning_problem.pos)
+        population = self._initialize(learning_problem.pos, learning_problem.neg)
         self._goal_found, self._result_population = self.algorithm.evolve(self.toolbox,
                                                                           population,
                                                                           self.num_generations,
@@ -1327,10 +1347,23 @@ class EvoLearner(BaseConceptLearner[EvoLearnerNode]):
 
         return self.terminate()
 
-    def _initialize(self, pos: Set[OWLNamedIndividual]):
+    def _initialize(self, pos: Set[OWLNamedIndividual], neg: Set[OWLNamedIndividual]):
+        if self.use_data_properties:
+            if isinstance(self.value_splitter, BinningValueSplitter):
+                self._dp_splits = self.value_splitter.compute_splits_properties(self.kb)
+                print(self._dp_splits)
+            elif isinstance(self.value_splitter, EntropyValueSplitter):
+                self._dp_splits = self.value_splitter.compute_splits_properties(self.kb, pos, neg)
+            else:
+                raise ValueError
+            self.__set_splitting_values()
+
         population = None
         if isinstance(self.init_method, EARandomWalkInitialization):
-            population = self.toolbox.population(population_size=self.population_size, pos=list(pos), kb=self.kb)
+            population = self.toolbox.population(population_size=self.population_size, pos=list(pos),
+                                                 kb=self.kb, use_data_properties=self.use_data_properties,
+                                                 dp_to_prim_type=self._dp_to_prim_type,
+                                                 dp_splits=self._dp_splits)
         else:
             population = self.toolbox.population(population_size=self.population_size)
         return population

@@ -6,7 +6,7 @@ from typing import Iterable, Set, Final, cast
 import owlready2
 
 from owlapy import namespaces
-from owlapy.model import OWLDatatype, OWLOntologyManager, OWLOntology, OWLClass, OWLDataProperty, OWLObjectProperty, \
+from owlapy.model import OWLDatatype, OWLLiteral, OWLOntologyManager, OWLOntology, OWLClass, OWLDataProperty, OWLObjectProperty, \
     OWLNamedIndividual, OWLReasoner, OWLClassExpression, OWLObjectPropertyExpression, OWLOntologyID, OWLAxiom, \
     OWLOntologyChange, AddImport, OWLEquivalentClassesAxiom, OWLThing, OWLAnnotationAssertionAxiom, DoubleOWLDatatype, \
     IRI, OWLObjectInverseOf, BooleanOWLDatatype, IntegerOWLDatatype
@@ -193,11 +193,11 @@ class OWLReasoner_Owlready2(OWLReasoner):
             warning("direct not implemented")
         pe_x: owlready2.DataPropertyClass = self._world[pe.get_iri().as_str()]
         for rng in pe_x.range:
-            if isinstance(rng, int):
+            if rng == int:
                 yield IntegerOWLDatatype
-            elif isinstance(rng, float):
+            elif rng == float:
                 yield DoubleOWLDatatype
-            elif isinstance(rng, bool):
+            elif rng == bool:
                 yield BooleanOWLDatatype
 
     def object_property_domains(self, pe: OWLObjectProperty, direct: bool = False) -> Iterable[OWLClass]:
@@ -235,7 +235,7 @@ class OWLReasoner_Owlready2(OWLReasoner):
         i: owlready2.Thing = self._world[ind.get_iri().as_str()]
         p: owlready2.DataPropertyClass = self._world[pe.get_iri().as_str()]
         for val in p._get_values_for_individual(i):
-            yield val
+            yield OWLLiteral(val)
 
     def data_properties(self, ind: OWLNamedIndividual) -> Iterable[OWLDataProperty]:
         i: owlready2.Thing = self._world[ind.get_iri().as_str()]

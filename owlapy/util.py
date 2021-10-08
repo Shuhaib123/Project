@@ -1,7 +1,7 @@
 from functools import singledispatchmethod, total_ordering
 from typing import Iterable, overload, TypeVar, Generic, Type, Tuple, Dict, List, cast, Optional
 
-from owlapy.model import OWLObject, HasIndex, HasIRI, OWLClassExpression, OWLClass, OWLObjectIntersectionOf, \
+from owlapy.model import OWLLiteral, OWLObject, HasIndex, HasIRI, OWLClassExpression, OWLClass, OWLObjectIntersectionOf, \
     OWLObjectUnionOf, OWLObjectComplementOf, OWLNothing, OWLThing, OWLObjectSomeValuesFrom, OWLObjectAllValuesFrom, \
     OWLObjectHasValue, OWLObjectMinCardinality, OWLObjectMaxCardinality, OWLObjectExactCardinality, OWLObjectHasSelf, \
     OWLObjectOneOf, OWLDataMaxCardinality, OWLDataMinCardinality, OWLDataExactCardinality, OWLDataHasValue, \
@@ -52,6 +52,12 @@ class OrderedOWLObject:
                 c.append(tuple(map(OrderedOWLObject, self.o.operands())))
             if isinstance(self.o, HasIRI):
                 c.append(self.o.get_iri().as_str())
+            if isinstance(self.o, OWLDataComplementOf):
+                c.append(OrderedOWLObject(self.o.get_data_range()))
+            if isinstance(self.o, OWLDatatypeRestriction):
+                c.append(len(self.o.get_facet_restrictions()))
+            if isinstance(self.o, OWLLiteral):
+                c.append(self.o.get_literal())
             if len(c) == 1:
                 raise NotImplementedError(type(self.o))
 
